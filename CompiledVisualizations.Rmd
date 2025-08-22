@@ -1,0 +1,1075 @@
+---
+title: "Trends in U.S. County-Level Crime Rates (2002-2014)"
+author: "Will Clary, Canace Finley, and Naa Adoley Acquaye"
+date: "11/13/2024"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme: cosmo
+    source_code: embed
+    code_folding: show
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = 'center'
+)
+```
+
+# Project Overview {.sidebar}
+
+This report analyzes crime patterns in the United States from 2002 to 2014, examining both violent and property crimes. The analysis includes visualization of trends, patterns, and distributions of different crime types over the years.
+
+## Dataset Description
+
+-   Source: National Neighborhood Data Archive (NaNDA)
+-   Years: 2002-2014
+-   Coverage: All U.S. counties (50 states including Alaska and Hawaii)
+-   Type: FBI Part I criminal offenses
+-   Access: Inter-University Consortium for Political and Social Research (ICPSR)
+
+## Key Variables
+
+-   Geographic Identifiers:
+    -   county_fipcode (Five-digit county code)
+    -   State and County FIPS codes
+-   Crime Categories:
+    -   Violent Crimes (Murder, Rape, Robbery, Assault)
+    -   Property Crimes (Burglary, Larceny, Vehicle Theft, Arson)
+-   Population Data:
+    -   County population figures
+    -   Agency reporting statistics
+
+## Target Audience
+
+-   Law Enforcement:
+    -   Resource allocation
+    -   Strategic planning
+    -   Prevention initiatives
+-   Policymakers:
+    -   Evidence-based decisions
+    -   Trend analysis
+    -   Policy effectiveness
+-   Community Members:
+    -   Local crime awareness
+    -   Informed decision-making
+    -   Safety planning
+
+## Learning Objectives
+
+-   Analyze crime rate evolution (2002-2014)
+-   Compare violent vs property crimes
+-   Identify high/low crime areas
+-   Explore population-crime correlations
+-   Examine temporal patterns
+
+# Executive Summary
+
+## Row {data-height="600"}
+
+### Key Findings {.tabset}
+
+#### Geographic Crime Distribution
+
+-   Significant regional variations in crime rates across U.S. counties
+-   Urban areas generally showed higher absolute crime numbers but not necessarily higher per capita rates
+-   Coastal regions demonstrated distinct crime patterns compared to inland areas
+-   Notable geographic clusters of both high and low crime rates emerged
+
+#### Temporal Trends
+
+-   Overall decline in both violent and property crime rates from 2002 to 2014
+-   Property crimes showed more substantial decrease compared to violent crimes
+-   Seasonal patterns evident in certain crime categories
+-   Gradual improvement in crime reporting and data quality over the study period
+
+#### Crime Type Analysis
+
+-   Property crimes consistently outnumbered violent crimes
+-   Larceny remained the most common property crime
+-   Aggravated assault was the most frequent violent crime
+-   Murder rates showed the least variation over time
+
+#### Population-Crime Relationship
+
+-   Complex relationship between population size and crime rates
+-   Larger counties showed higher absolute crime numbers but varied per capita rates
+-   Population density appeared more significant than total population in predicting crime rates
+-   Urban-rural differences evident in both crime types and rates
+
+## Row {data-height="400"}
+
+### Recommendations {.tabset}
+
+#### Law Enforcement
+
+-   Focus resources on high-crime areas identified through geographic analysis
+-   Use seasonal trend data for strategic planning
+-   Implement targeted approaches based on predominant crime types in each region
+
+#### Policymakers
+
+-   Consider population density in crime prevention strategies
+-   Focus on successful crime reduction models from similar demographic areas
+-   Allocate resources based on both absolute crime numbers and per capita rates
+
+#### Community Members
+
+-   Use county-level data for informed decision-making
+-   Consider both violent and property crime rates in safety planning
+-   Reference temporal trends for understanding long-term community changes
+
+## Row {data-height="300"}
+
+### Methodology {.tabset}
+
+#### Development Environment
+
+-   Analysis conducted using R (4.x) and RStudio
+-   R Markdown used for literate programming and reproducible research
+-   Flexdashboard framework implemented for interactive dashboard creation
+
+#### Key Technologies
+
+-   Document generation through R Markdown and Flexdashboard
+-   Data processing using Tidyverse packages
+-   Visualization tools including ggplot2, Plotly, and Leaflet
+-   Interactive features implemented through Shiny
+
+```{r libraries, include=FALSE}
+library(tidyverse)
+library(readr)
+library(ggplot2)
+library(viridis)
+library(scales)
+library(sf)
+library(tigris)
+library(leaflet)
+library(shiny)
+library(plotly)
+library(maps)
+library(gridExtra)
+library(egg)
+library(RColorBrewer)
+library(shinyWidgets)
+library(magrittr)
+library(DT)
+library(fontawesome)
+library(kableExtra)
+```
+
+```{r load_data, include=FALSE}
+load(url("https://github.com/w-clary/LIS4210/raw/main/38649-0001-Data.rda"))
+crime_data <- da38649.0001
+
+fips_crosswalk <- read.csv("https://github.com/w-clary/LIS4210/raw/main/State__County_and_City_FIPS_Reference_Table_20241110.csv", 
+                          stringsAsFactors = FALSE, 
+                          colClasses = c(county_fipcode = "character")) %>%
+  select(state_name, county_name, county_fipcode, state_fipcode) %>%
+  distinct() %>%
+  mutate(county_fipcode = sprintf("%05d", as.numeric(trimws(county_fipcode))),
+         state_fipcode = sprintf("%02d", as.numeric(state_fipcode))) %>%
+  filter(!is.na(state_name), !is.na(county_fipcode))
+
+state_abbreviations <- data.frame(
+  FIPS_ST = c("01", "02", "04", "05", "06", "08", "09", "10", "11", "12", 
+              "13", "15", "16", "17", "18", "19", "20", "21", "22", "23", 
+              "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", 
+              "34", "35", "36", "37", "38", "39", "40", "41", "42", "44", 
+              "45", "46", "47", "48", "49", "50", "51", "53", "54", "55", "56"),
+  State_Abbr = c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL",
+                 "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME",
+                 "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH",
+                 "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI",
+                 "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY")
+)
+
+missing_values <- colSums(is.na(crime_data))
+```
+
+# Geographic Crime Analysis
+
+## Interactive Crime Rate Map
+
+```{r geographic_data_prep, include=FALSE}
+map_states <- map_data("county")
+state_outlines <- map_data("state")
+
+fips_clean <- fips_crosswalk %>%
+  mutate(state_name_lower = tolower(state_name),
+         county_name_lower = tolower(county_name))
+
+merged_counties <- inner_join(map_states, fips_clean, 
+                             by = c("region" = "state_name_lower", 
+                                    "subregion" = "county_name_lower"),
+                             relationship = "many-to-many")
+
+county_crime_map <- inner_join(merged_counties, crime_data, 
+                              by = c("county_fipcode" = "STCOFIPS"),
+                              relationship = "many-to-many")
+```
+
+```{r crime_map_controls}
+fluidRow(
+  column(6,
+    sliderInput("crime_year", "Select Year:",
+                min = 2002, max = 2014, 
+                value = 2002, step = 1, sep = "")
+  ),
+  column(6,
+    selectInput("color_scheme", "Color Scheme:",
+                choices = c("Viridis" = "viridis", "Plasma" = "plasma", 
+                           "Inferno" = "inferno", "Magma" = "magma"),
+                selected = "viridis")
+  )
+)
+
+fluidRow(
+  column(12, style = "text-align: center; margin-top: 10px;",
+    actionButton("prev_year", "◀ Previous Year", 
+                 style = "margin-right: 20px; background-color: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px;"),
+    actionButton("next_year", "Next Year ▶", 
+                 style = "margin-left: 20px; background-color: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px;")
+  )
+)
+```
+
+```{r crime_map_render}
+observeEvent(input$prev_year, {
+  current_year <- input$crime_year
+  if(current_year > 2002) {
+    updateSliderInput(session, "crime_year", value = current_year - 1)
+  }
+})
+
+observeEvent(input$next_year, {
+  current_year <- input$crime_year
+  if(current_year < 2014) {
+    updateSliderInput(session, "crime_year", value = current_year + 1)
+  }
+})
+
+renderPlot({
+  req(input$crime_year, input$color_scheme)
+  
+  year_data <- county_crime_map %>%
+    mutate(YEAR = as.numeric(as.character(YEAR))) %>%
+    filter(YEAR == as.numeric(input$crime_year)) %>%
+    group_by(county_fipcode) %>%
+    mutate(
+      total_crime = MURDER + RAPE + ROBBERY + AGASSLT + BURGLRY + LARCENY + MVTHEFT + ARSON,
+      crime_rate = total_crime / CPOPCRIM
+    ) %>%
+    filter(is.finite(crime_rate), crime_rate > 0, crime_rate < 1) %>%
+    ungroup()
+  
+  ggplot(year_data, aes(long, lat, group = group)) +
+    geom_polygon(aes(fill = crime_rate), colour = alpha("white", 0.3), linewidth = 0.1) +
+    geom_polygon(data = state_outlines, aes(x = long, y = lat, group = group),
+                 color = "white", fill = NA, linewidth = 0.5) +
+    scale_fill_viridis_c(
+      name = "Crime Rate\nPer Capita",
+      labels = scales::number_format(accuracy = 0.01),
+      option = input$color_scheme,
+      trans = "sqrt",
+      na.value = "grey90"
+    ) +
+    coord_fixed(1.3) +
+    theme_void() +
+    labs(
+      title = paste("U.S. County Crime Rates -", input$crime_year),
+      subtitle = "Crime incidents per capita by county",
+      caption = "Data: National Neighborhood Data Archive (NaNDA)"
+    ) +
+    theme(
+      plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 12, hjust = 0.5, color = "gray50"),
+      plot.caption = element_text(size = 8, hjust = 1, color = "gray50"),
+      legend.position = "right",
+      legend.title = element_text(size = 10),
+      legend.text = element_text(size = 8),
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.background = element_rect(fill = "white", color = NA)
+    )
+  
+}, height = 600, width = 1000)
+```
+
+```{r map_instructions}
+div(
+  style = "text-align: center; margin-top: 15px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;",
+  p(strong("Instructions:"), 
+    "Use the slider to jump to any year, or use the Previous/Next Year buttons to step through years one at a time.",
+    style = "margin: 5px 0; color: #495057;"),
+  p("Higher crime rates are shown in brighter colors. The color scheme can be changed using the dropdown menu.",
+    style = "margin: 5px 0; color: #6c757d; font-size: 0.9em;")
+)
+```
+
+# Crime Pattern Analysis
+
+## Interactive Crime Heatmap
+
+This visualization shows the standardized patterns of different crime types across years.
+
+```{r heatmap_data_prep}
+crime_patterns <- crime_data %>%
+  select(YEAR, MURDER, RAPE, ROBBERY, AGASSLT, BURGLRY, LARCENY, MVTHEFT, ARSON) %>%
+  group_by(YEAR) %>%
+  summarise(across(everything(), sum, na.rm = TRUE), .groups = 'drop') %>%
+  pivot_longer(cols = -YEAR, names_to = "Crime_Type", values_to = "Count") %>%
+  group_by(Crime_Type) %>%
+  mutate(z_score = as.numeric(scale(Count))) %>%
+  ungroup()
+```
+
+```{r heatmap_controls}
+selectInput("color_scheme_heatmap", "Select Color Scheme:",
+            choices = c("Plasma" = "plasma", "Magma" = "magma",
+                       "Viridis" = "viridis", "Inferno" = "inferno"),
+            selected = "plasma")
+
+sliderInput("year_range_heatmap", "Select Year Range:",
+            min = min(crime_patterns$YEAR), max = max(crime_patterns$YEAR),
+            value = c(2002, 2014), step = 1, sep = "")
+
+checkboxGroupInput("crime_types_heatmap", "Select Crime Types:",
+                  choices = unique(crime_patterns$Crime_Type),
+                  selected = unique(crime_patterns$Crime_Type))
+```
+
+```{r heatmap_render}
+output$heatmap_display <- renderPlotly({
+  req(input$year_range_heatmap, input$crime_types_heatmap, input$color_scheme_heatmap)
+  
+  filtered_data <- crime_patterns %>%
+    filter(YEAR >= input$year_range_heatmap[1],
+           YEAR <= input$year_range_heatmap[2],
+           Crime_Type %in% input$crime_types_heatmap)
+  
+  p <- ggplot(filtered_data, aes(x = YEAR, y = Crime_Type, fill = z_score)) +
+    geom_tile() +
+    scale_fill_viridis(option = input$color_scheme_heatmap) +
+    labs(title = paste("Crime Patterns:", input$year_range_heatmap[1], "-", input$year_range_heatmap[2])) +
+    theme_minimal()
+  
+  ggplotly(p)
+})
+
+plotlyOutput("heatmap_display", width = "100%", height = "600px")
+```
+
+# Interactive Data Explorer
+
+## County-Level Data Table
+
+```{r data_table_prep}
+table_data <- crime_data %>%
+  mutate(FIPS_ST = as.character(FIPS_ST),
+         FIPS_CTY = as.character(FIPS_CTY),
+         Combined_FIPS = sprintf("%02d%03d", as.numeric(FIPS_ST), as.numeric(FIPS_CTY))) %>%
+  left_join(fips_crosswalk, by = c("Combined_FIPS" = "county_fipcode"), 
+            relationship = "many-to-many")
+
+crime_types <- c("MURDER", "RAPE", "ROBBERY", "AGASSLT", "BURGLRY", "MVTHEFT", "ARSON")
+```
+
+```{r data_table_layout}
+fluidRow(
+  column(6,
+    div(style = "background-color: #f8f9fa; padding: 15px; border-radius: 5px; height: 400px;",
+      h4("Data Filters", style = "margin-top: 0; margin-bottom: 15px; color: #333;"),
+      
+      selectInput("state_table", "Select State:", 
+                  choices = sort(unique(fips_crosswalk$state_name)), 
+                  selected = NULL, multiple = FALSE),
+      
+      uiOutput("countyUI_table"),
+      
+      pickerInput("crime_type_table", "Select Crime Type(s):",  
+                  choices = crime_types, selected = "MURDER", 
+                  options = list(`actions-box` = TRUE), multiple = TRUE),
+      
+      sliderInput("year_table", "Select Year Range:",  
+                  min = 2002, max = 2014, value = c(2002, 2014), 
+                  step = 1, sep = "")
+    )
+  ),
+  
+  column(6,
+    div(style = "background-color: #fff3cd; padding: 15px; border-radius: 5px; height: 400px; border: 1px solid #ffeaa7;",
+      h4("Data Summary", style = "margin-top: 0; margin-bottom: 15px; color: #333;"),
+      verbatimTextOutput("data_summary")
+    )
+  )
+)
+
+fluidRow(
+  column(12,
+    div(style = "margin-top: 20px;",
+      DTOutput("crime_data_table")
+    )
+  )
+)
+```
+
+```{r data_table_logic}
+observeEvent(input$state_table, {
+  req(input$state_table)  
+  counties <- unique(fips_crosswalk$county_name[fips_crosswalk$state_name == input$state_table])
+  
+  output$countyUI_table <- renderUI({
+    pickerInput("county_table", "Select County:", 
+                choices = counties, options = list(`actions-box` = TRUE), 
+                multiple = TRUE)  
+  })
+})
+
+filtered_table_data <- reactive({
+  req(input$state_table, input$county_table, input$crime_type_table)
+  
+  selected_counties <- unique(fips_crosswalk$county_fipcode[fips_crosswalk$county_name %in% input$county_table])
+  selected_counties <- sprintf("%05d", as.numeric(selected_counties))  
+  
+  table_data %>%
+    filter(state_name == input$state_table, 
+           YEAR >= input$year_table[1], YEAR <= input$year_table[2],
+           Combined_FIPS %in% selected_counties) %>%
+    group_by(YEAR, state_name, county_name) %>%
+    summarise(across(all_of(input$crime_type_table), sum, na.rm = TRUE), .groups = 'drop')
+})
+
+output$data_summary <- renderPrint({
+  req(filtered_table_data())  
+  selected_data <- filtered_table_data()
+  state_counties <- paste(unique(selected_data$county_name), collapse = ", ")
+  
+  cat("Data Summary:\n",
+      "State: ", input$state_table, "\n",
+      "County(s): ", state_counties, "\n",
+      "Crime Type(s): ", paste(input$crime_type_table, collapse = ", "), "\n",
+      "Year Range: ", input$year_table[1], " to ", input$year_table[2], "\n")
+})
+
+output$crime_data_table <- renderDT({
+  req(filtered_table_data())
+  
+  display_data <- filtered_table_data() %>%
+    rename(State = state_name, County = county_name) %>%
+    select(YEAR, State, County, all_of(intersect(input$crime_type_table, names(.))))
+  
+  datatable(display_data, 
+            options = list(pageLength = 10, scrollX = TRUE, scrollY = "400px"))
+})
+```
+
+# Violent Crime Trends
+
+## Interactive State Comparison
+
+```{r state_trends_data_prep}
+state_crime_trends <- crime_data %>% 
+  mutate(total_violent = MURDER + RAPE + ROBBERY + AGASSLT,
+         FIPS_ST = as.character(FIPS_ST)) %>% 
+  group_by(YEAR, FIPS_ST) %>% 
+  summarize(total_violent = sum(total_violent, na.rm = TRUE),
+            total_population = sum(CPOPCRIM, na.rm = TRUE), .groups = 'drop') %>%
+  mutate(violent_rate = (total_violent / total_population) * 100000) %>%
+  left_join(state_abbreviations, by = "FIPS_ST") %>%
+  filter(!is.na(State_Abbr), is.finite(violent_rate), violent_rate > 0) %>%
+  arrange(State_Abbr, YEAR)
+
+all_states <- sort(unique(state_crime_trends$State_Abbr))
+state_colors <- viridis::viridis(length(all_states), option = "turbo")
+names(state_colors) <- all_states
+```
+
+```{r state_selection_interface}
+fluidRow(
+  column(3,
+    div(style = "background-color: #f8f9fa; padding: 15px; border-radius: 5px; height: 650px; overflow-y: auto;",
+      h4("Select States:", style = "margin-top: 0; margin-bottom: 15px; color: #333;"),
+      
+      div(style = "margin-bottom: 15px;",
+        actionButton("select_all_states", "Select All", 
+                     style = "margin-right: 8px; background-color: #28a745; color: white; border: none; padding: 5px 10px; border-radius: 3px; font-size: 12px;"),
+        actionButton("select_none_states", "Select None", 
+                     style = "background-color: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 3px; font-size: 12px;")
+      ),
+      
+      checkboxGroupInput("selected_states", "", choices = setNames(all_states, all_states),
+                        selected = c("CA", "TX", "NY", "FL", "IL"), width = "100%"),
+      
+      tags$style(HTML(paste0("
+        #selected_states .checkbox {
+          margin-bottom: 5px; margin-top: 3px;
+        }
+        #selected_states .checkbox label {
+          font-size: 13px; margin-bottom: 0; display: flex; align-items: center; font-weight: bold;
+        }
+        #selected_states .checkbox input[type='checkbox'] {
+          margin-right: 8px; transform: scale(1.1);
+        }",
+        paste(sapply(1:length(all_states), function(i) {
+          state <- all_states[i]
+          color <- state_colors[i]
+          paste0("
+        #selected_states .checkbox:nth-child(", i, ") label {
+          color: ", color, ";
+        }
+        #selected_states .checkbox:nth-child(", i, ") label::before {
+          content: '● '; font-size: 16px; margin-right: 5px; color: ", color, ";
+        }")
+        }), collapse = "")
+      )))
+    )
+  ),
+  
+  column(9,
+    div(style = "height: 650px;",
+      plotlyOutput("state_crime_plot", width = "100%", height = "100%")
+    )
+  )
+)
+```
+
+```{r state_trends_logic}
+observeEvent(input$select_all_states, {
+  updateCheckboxGroupInput(session, "selected_states", selected = all_states)
+})
+
+observeEvent(input$select_none_states, {
+  updateCheckboxGroupInput(session, "selected_states", selected = character(0))
+})
+
+output$state_crime_plot <- renderPlotly({
+  req(input$selected_states)
+  
+  filtered_data <- state_crime_trends %>%
+    filter(State_Abbr %in% input$selected_states)
+  
+  p <- ggplot(filtered_data, 
+              aes(x = YEAR, y = violent_rate, color = State_Abbr, group = State_Abbr,
+                  text = paste("State:", State_Abbr, "\nYear:", YEAR,
+                             "\nViolent Crime Rate:", round(violent_rate, 1), "per 100K",
+                             "\nTotal Crimes:", scales::comma(total_violent),
+                             "\nPopulation:", scales::comma(total_population)))) +
+    geom_line(alpha = 0.8, linewidth = 1.5) + 
+    geom_point(alpha = 0.9, size = 3.5) +
+    labs(x = "Year", y = "Violent Crimes per 100,000 Population", 
+         title = paste("Violent Crime Rates -", length(input$selected_states), "Selected States"),
+         color = "State") +
+    scale_x_continuous(breaks = seq(2002, 2014, 2)) +
+    scale_color_viridis_d(option = "turbo") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 11),
+          axis.text.y = element_text(size = 11),
+          axis.title = element_text(size = 12, face = "bold"),
+          plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+          legend.position = "right", panel.grid.minor = element_blank(),
+          plot.margin = margin(20, 20, 20, 20))
+  
+  ggplotly(p, tooltip = "text") %>%
+    layout(showlegend = TRUE,
+           legend = list(orientation = "v", x = 1.02, y = 0.5, font = list(size = 11)),
+           margin = list(l = 80, r = 120, t = 80, b = 60), hovermode = "closest")
+})
+```
+
+# Crime Rate Analysis
+
+## Interactive Bubble Chart
+
+```{r bubble_data_prep}
+bubble_chart_data <- crime_data %>%
+  group_by(YEAR) %>%
+  summarize(violent_crimes = sum(MURDER + RAPE + ROBBERY + AGASSLT, na.rm = TRUE),
+            property_crimes = sum(BURGLRY + LARCENY + MVTHEFT + ARSON, na.rm = TRUE),
+            total_population = sum(CPOPCRIM, na.rm = TRUE), .groups = 'drop') %>%
+  mutate(violent_rate = (violent_crimes / total_population) * 100000,
+         property_rate = (property_crimes / total_population) * 100000)
+```
+
+```{r bubble_controls}
+fluidRow(
+  column(4,
+    selectInput("crime_view_bubble", "Select Crime Type:",
+                choices = c("Violent Crimes" = "violent", "Property Crimes" = "property"),
+                selected = "violent")
+  ),
+  column(4,
+    selectInput("bubble_color", "Select Color:",
+                choices = c("Magenta" = "#FF69B4", "Blue" = "#0000FF", 
+                           "Green" = "#00FF00", "Purple" = "#800080", "Red" = "#FF0000"),
+                selected = "#FF69B4")
+  ),
+  column(4,
+    sliderInput("year_range_bubble", "Select Year Range:",
+                min = 2002, max = 2014, value = c(2002, 2014), step = 1, sep = "")
+  )
+)
+```
+
+```{r bubble_render}
+output$bubble_plot <- renderPlotly({
+  req(input$crime_view_bubble, input$bubble_color, input$year_range_bubble)
+  
+  filtered_data <- bubble_chart_data %>%
+    filter(YEAR >= input$year_range_bubble[1] & YEAR <= input$year_range_bubble[2])
+  
+  y_values <- if(input$crime_view_bubble == "violent") {
+    filtered_data$violent_rate
+  } else {
+    filtered_data$property_rate
+  }
+  
+  p <- ggplot(filtered_data, aes(x = YEAR, y = y_values, size = total_population/1000000)) +
+    geom_point(alpha = 0.7, color = input$bubble_color) +
+    scale_size_continuous(name = "Population\n(Millions)", range = c(8, 25)) +
+    scale_x_continuous(breaks = unique(filtered_data$YEAR)) +
+    labs(title = paste(ifelse(input$crime_view_bubble == "violent", "Violent", "Property"), "Crime Rate vs. Year"),
+         subtitle = paste("Years:", input$year_range_bubble[1], "-", input$year_range_bubble[2]),
+         x = "Year", y = "Rate per 100,000 Population") +
+    theme_minimal() +
+    theme(plot.title = element_text(size = 14, face = "bold"),
+          plot.subtitle = element_text(size = 10, color = "gray50"),
+          legend.position = "right")
+  
+  ggplotly(p)
+})
+
+output$bubble_change_text <- renderText({
+  req(input$year_range_bubble, input$crime_view_bubble)
+  
+  filtered_data <- bubble_chart_data %>%
+    filter(YEAR >= input$year_range_bubble[1] & YEAR <= input$year_range_bubble[2]) %>%
+    arrange(YEAR)
+  
+  if(nrow(filtered_data) > 1) {
+    rate_col <- if(input$crime_view_bubble == "violent") "violent_rate" else "property_rate"
+    start_rate <- filtered_data[[rate_col]][1]
+    end_rate <- filtered_data[[rate_col]][nrow(filtered_data)]
+    percent_change <- round(((end_rate - start_rate) / start_rate) * 100, 2)
+    
+    paste("Percentage Change (", input$year_range_bubble[1], "-", input$year_range_bubble[2], "):",
+          percent_change, "%")
+  } else {
+    "Select a wider year range to calculate change"
+  }
+})
+```
+
+```{r bubble_output}
+plotlyOutput("bubble_plot", width = "100%", height = "500px")
+textOutput("bubble_change_text")
+```
+
+# National Crime Trends
+
+## Crime Rate Summary
+
+```{r national_trends_data}
+national_trends <- crime_data %>%
+  group_by(YEAR) %>%
+  summarize(violent_crimes = sum(MURDER + RAPE + ROBBERY + AGASSLT, na.rm = TRUE),
+            property_crimes = sum(BURGLRY + LARCENY + MVTHEFT + ARSON, na.rm = TRUE),
+            total_population = sum(CPOPCRIM, na.rm = TRUE), .groups = 'drop') %>%
+  mutate(violent_rate = (violent_crimes / total_population) * 100000,
+         property_rate = (property_crimes / total_population) * 100000) %>%
+  pivot_longer(cols = c(violent_rate, property_rate), names_to = "crime_type", values_to = "rate") %>%
+  mutate(crime_type = case_when(
+    crime_type == "violent_rate" ~ "Violent Crimes",
+    crime_type == "property_rate" ~ "Property Crimes"
+  ))
+```
+
+```{r national_trends_plot}
+ggplot(national_trends, aes(x = YEAR, y = rate, color = crime_type)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  facet_wrap(~crime_type, scales = "free_y", nrow = 2) +
+  scale_color_manual(values = c("Property Crimes" = "#2E86C1", "Violent Crimes" = "#C0392B")) +
+  scale_x_continuous(breaks = 2002:2014) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(title = "U.S. Crime Rates (2002-2014)", subtitle = "Per 100,000 Population",
+       x = "Year", y = "Crimes per 100,000 Population", color = "Crime Type") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 16, face = "bold"),
+        plot.subtitle = element_text(size = 12, color = "gray50"),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", strip.text = element_text(size = 12, face = "bold"))
+```
+
+```{r national_trends_summary}
+summary_stats <- national_trends %>%
+  group_by(crime_type) %>%
+  summarise(Start_Rate = round(first(rate), 1), End_Rate = round(last(rate), 1),
+            Mean_Rate = round(mean(rate), 1),
+            Percent_Change = round(((last(rate) - first(rate)) / first(rate) * 100), 1),
+            .groups = 'drop') %>%
+  mutate(Change_Direction = ifelse(Percent_Change > 0, "↗ Increase", "↘ Decrease"))
+
+knitr::kable(summary_stats,
+  col.names = c("Crime Type", "2002 Rate", "2014 Rate", "Average Rate", "% Change", "Trend"),
+  caption = "**National Crime Rate Trends Summary (2002-2014)**",
+  align = c("l", "r", "r", "r", "r", "c")) %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                           full_width = FALSE, position = "center") %>%
+  kableExtra::column_spec(5, color = ifelse(summary_stats$Percent_Change > 0, "red", "green")) %>%
+  kableExtra::column_spec(6, color = ifelse(summary_stats$Percent_Change > 0, "red", "green"))
+
+violent_change <- summary_stats$Percent_Change[summary_stats$crime_type == "Violent Crimes"]
+property_change <- summary_stats$Percent_Change[summary_stats$crime_type == "Property Crimes"]
+
+cat("\n**Key Findings:**\n\n")
+cat("• Violent crime rates", ifelse(violent_change > 0, "increased", "decreased"), 
+    "by", abs(violent_change), "% over the study period\n")
+cat("• Property crime rates", ifelse(property_change > 0, "increased", "decreased"), 
+    "by", abs(property_change), "% over the study period\n")
+cat("• Both crime types showed", 
+    ifelse(violent_change < 0 & property_change < 0, "downward", "mixed"), 
+    "trends from 2002 to 2014")
+```
+
+# Distribution Analysis
+
+## Crime Distribution Patterns
+
+```{r distribution_data_prep}
+crime_distribution <- crime_data %>%
+  select(YEAR, MURDER, RAPE, ROBBERY, AGASSLT, BURGLRY, LARCENY, MVTHEFT, ARSON) %>%
+  pivot_longer(cols = -YEAR, names_to = "Crime_Type", values_to = "Count") %>%
+  filter(!is.infinite(Count), !is.na(Count), Count >= 0) %>%
+  mutate(Crime_Type = case_when(
+    Crime_Type == "MURDER" ~ "Murder", Crime_Type == "RAPE" ~ "Rape",
+    Crime_Type == "ROBBERY" ~ "Robbery", Crime_Type == "AGASSLT" ~ "Assault",
+    Crime_Type == "BURGLRY" ~ "Burglary", Crime_Type == "LARCENY" ~ "Larceny",
+    Crime_Type == "MVTHEFT" ~ "Vehicle Theft", Crime_Type == "ARSON" ~ "Arson"
+  ))
+```
+
+## Column {data-width="6300"}
+
+### Violent Crimes Distribution
+
+```{r violent_crimes_distribution}
+crime_distribution %>%
+  filter(Crime_Type %in% c("Murder", "Rape", "Robbery", "Assault")) %>%
+  ggplot(aes(x = as.factor(YEAR), y = Count + 1, fill = Crime_Type)) +
+  geom_boxplot(alpha = 0.7, outlier.size = 0.8) +
+  scale_fill_viridis_d() +
+  scale_y_log10(labels = scales::comma_format()) +
+  labs(title = "Distribution of Violent Crimes by Year (2002-2014)",
+       x = "Year", y = "Number of Crimes (log scale)", fill = "Crime Type") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    axis.title = element_text(size = 11, face = "bold"),
+    plot.title = element_text(size = 13, face = "bold", hjust = 0.5), 
+    legend.position = "right",
+    legend.text = element_text(size = 9),
+    legend.title = element_text(size = 10, face = "bold"),
+    plot.margin = margin(20, 15, 20, 15),
+    panel.grid.minor = element_blank()
+  )
+```
+
+## Column {data-width="1200"}
+
+### {.no-title}
+
+```{r spacing_column}
+HTML("<div style='height: 100%; background-color: transparent;'></div>")
+```
+
+## Column {data-width="6300"}
+
+### Property Crimes Distribution
+
+```{r property_crimes_distribution}
+crime_distribution %>%
+  filter(Crime_Type %in% c("Burglary", "Larceny", "Vehicle Theft", "Arson")) %>%
+  ggplot(aes(x = as.factor(YEAR), y = Count + 1, fill = Crime_Type)) +
+  geom_boxplot(alpha = 0.7, outlier.size = 0.8) +
+  scale_fill_viridis_d() +
+  scale_y_log10(labels = scales::comma_format()) +
+  labs(title = "Distribution of Property Crimes by Year (2002-2014)",
+       x = "Year", y = "Number of Crimes (log scale)", fill = "Crime Type") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    axis.title = element_text(size = 11, face = "bold"),
+    plot.title = element_text(size = 13, face = "bold", hjust = 0.5), 
+    legend.position = "right",
+    legend.text = element_text(size = 9),
+    legend.title = element_text(size = 10, face = "bold"),
+    plot.margin = margin(20, 15, 20, 15),
+    panel.grid.minor = element_blank()
+  )
+```
+
+# Comparative Analysis
+
+## State-Level Crime Comparison
+
+```{r state_comparison_data_prep}
+state_comparison_data <- crime_data %>%
+  mutate(YEAR = as.numeric(YEAR)) %>%
+  left_join(fips_crosswalk %>% 
+              select(county_fipcode, state_name, county_name) %>% 
+              distinct(), 
+            by = c("STCOFIPS" = "county_fipcode")) %>%
+  filter(!is.na(state_name), !is.na(county_name))
+```
+
+```{r stacked_bar_controls}
+fluidRow(
+  column(6,
+    selectInput("state_bar", "Select State:", 
+                choices = sort(unique(state_comparison_data$state_name)), 
+                selected = sort(unique(state_comparison_data$state_name))[1])
+  ),
+  column(6,
+    selectInput("year_bar", "Select Year:", 
+                choices = sort(unique(state_comparison_data$YEAR)), 
+                selected = sort(unique(state_comparison_data$YEAR))[1])
+  )
+)
+```
+
+```{r stacked_bar_logic}
+observeEvent(input$state_bar, {
+  req(input$state_bar != "")
+  available_years <- state_comparison_data %>%
+    filter(state_name == input$state_bar) %>%
+    pull(YEAR) %>% unique() %>% sort()
+  
+  updateSelectInput(session, "year_bar", choices = available_years, 
+                    selected = available_years[1])
+})
+
+output$stacked_bar_plot <- renderPlot({
+  req(input$state_bar, input$year_bar)
+  
+  filtered_data <- state_comparison_data %>%
+    filter(YEAR == as.numeric(input$year_bar), state_name == input$state_bar) %>%
+    group_by(county_name) %>%
+    summarise(across(c("MURDER", "RAPE", "ROBBERY", "AGASSLT", "BURGLRY", "MVTHEFT", "ARSON"), 
+                     sum, na.rm = TRUE), .groups = 'drop') %>%
+    mutate(Total_Crime = MURDER + RAPE + ROBBERY + AGASSLT + BURGLRY + MVTHEFT + ARSON) %>%
+    arrange(desc(Total_Crime)) %>% slice_head(n = 15) %>%
+    pivot_longer(cols = c("MURDER", "RAPE", "ROBBERY", "AGASSLT", "BURGLRY", "MVTHEFT", "ARSON"), 
+                 names_to = "CrimeType", values_to = "Count") %>%
+    filter(Count > 0)
+  
+  ggplot(filtered_data, aes(x = reorder(county_name, Count), y = Count, fill = CrimeType)) +
+    geom_bar(stat = "identity", position = "stack") + coord_flip() +
+    labs(title = paste("Top 15 Counties by Crime in", input$state_bar, "for", input$year_bar),
+         x = "County", y = "Number of Crimes") +
+    scale_fill_manual(values = brewer.pal(7, "Set3"),
+                      labels = c("Aggravated Assault", "Arson", "Burglary", "Murder", 
+                               "Motor Vehicle Theft", "Rape", "Robbery"), name = "Crime Type") +
+    theme_minimal() +
+    theme(plot.title = element_text(size = 12, face = "bold"),
+          axis.text.y = element_text(size = 10), legend.position = "right")
+})
+
+plotOutput("stacked_bar_plot", width = "100%", height = "600px")
+```
+
+# Summary Insights
+
+## Comprehensive Crime Analysis
+
+```{r population_crime_analysis}
+population_crime_data <- crime_data %>% 
+  mutate(total_crime = MURDER + RAPE + ROBBERY + AGASSLT + BURGLRY + LARCENY + MVTHEFT + ARSON,
+         crime_rate = total_crime / CPOPCRIM) %>% 
+  filter(is.finite(crime_rate), crime_rate > 0, crime_rate < 1, CPOPCRIM > 100) %>%
+  sample_n(min(3000, nrow(.)))
+
+fluidRow(
+  column(4,
+    sliderInput("pop_range", "Population Range:",
+                min = 0, max = 2000000, value = c(0, 500000), step = 10000)
+  ),
+  column(4,
+    sliderInput("crime_rate_range", "Crime Rate Range:",
+                min = 0, max = 1, value = c(0, 0.5), step = 0.05)
+  ),
+  column(4,
+    selectInput("point_color_scatter", "Point Color:",
+                choices = c("Blue" = "#0000FF", "Red" = "#FF0000", 
+                           "Green" = "#00AA00", "Purple" = "#800080"),
+                selected = "#0000FF")
+  )
+)
+
+renderPlotly({
+  req(input$pop_range, input$crime_rate_range, input$point_color_scatter)
+  
+  filtered_data <- population_crime_data %>%
+    filter(CPOPCRIM >= input$pop_range[1], CPOPCRIM <= input$pop_range[2],
+           crime_rate >= input$crime_rate_range[1], crime_rate <= input$crime_rate_range[2])
+  
+  p <- ggplot(filtered_data, 
+              aes(x = CPOPCRIM, y = crime_rate,
+                  text = paste("Population:", format(CPOPCRIM, big.mark=","),
+                             "\nCrime Rate:", round(crime_rate, 3),
+                             "\nTotal Crimes:", total_crime))) +
+    geom_point(alpha = 0.6, color = input$point_color_scatter, size = 1.5) +
+    geom_smooth(method = "loess", se = TRUE, color = "red", alpha = 0.3) +
+    labs(x = "County Population", y = "Per Capita Crime Rate", 
+         title = "County Population vs Crime Rate",
+         subtitle = paste("Sample of", nrow(filtered_data), "counties")) +
+    scale_x_continuous(labels = scales::comma) +
+    scale_y_continuous(labels = scales::number_format(accuracy = 0.001)) +
+    theme_minimal() +
+    theme(plot.title = element_text(face = "bold"),
+          plot.subtitle = element_text(color = "gray50"))
+  
+  ggplotly(p, tooltip = "text") %>% layout(showlegend = FALSE)
+})
+```
+
+## Crime Type Rankings
+
+```{r crime_rankings}
+all_crime_totals <- crime_data %>%
+  summarise(Murder = sum(MURDER, na.rm = TRUE), Rape = sum(RAPE, na.rm = TRUE),
+            Robbery = sum(ROBBERY, na.rm = TRUE), Assault = sum(AGASSLT, na.rm = TRUE),
+            Burglary = sum(BURGLRY, na.rm = TRUE), Larceny = sum(LARCENY, na.rm = TRUE),
+            Vehicle_Theft = sum(MVTHEFT, na.rm = TRUE), Arson = sum(ARSON, na.rm = TRUE)) %>%
+  pivot_longer(everything(), names_to = "Crime_Type", values_to = "Total") %>%
+  mutate(Crime_Category = case_when(
+           Crime_Type %in% c("Murder", "Rape", "Robbery", "Assault") ~ "Violent",
+           TRUE ~ "Property"),
+         Percentage = round((Total / sum(Total)) * 100, 1),
+         Crime_Type = case_when(Crime_Type == "Vehicle_Theft" ~ "Vehicle Theft",
+                               Crime_Type == "Assault" ~ "Aggravated Assault",
+                               TRUE ~ Crime_Type)) %>%
+  arrange(desc(Total))
+
+knitr::kable(all_crime_totals,
+  col.names = c("Crime Type", "Total Crimes", "Category", "% of All Crimes"),
+  caption = "**Crime Type Rankings (2002-2014)**",
+  align = c("l", "r", "c", "r"), format.args = list(big.mark = ",")) %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"),
+                           full_width = FALSE, position = "center") %>%
+  kableExtra::row_spec(which(all_crime_totals$Crime_Category == "Violent"), background = "#ffebee") %>%
+  kableExtra::row_spec(which(all_crime_totals$Crime_Category == "Property"), background = "#e8f5e8")
+```
+
+# Geographic Insights
+
+## State Crime Distribution
+
+```{r treemap_data_prep}
+state_crime_totals <- crime_data %>%
+  mutate(FIPS_ST = sprintf("%02d", as.numeric(as.character(FIPS_ST)))) %>%
+  group_by(FIPS_ST) %>%
+  summarise(Total = sum(MURDER + RAPE + ROBBERY + AGASSLT + BURGLRY + LARCENY + MVTHEFT + ARSON, na.rm = TRUE),
+            .groups = 'drop') %>%
+  left_join(fips_crosswalk %>% select(state_fipcode, state_name) %>% distinct(), 
+            by = c("FIPS_ST" = "state_fipcode")) %>%
+  filter(!is.na(state_name)) %>% arrange(desc(Total))
+
+state_breakdown <- crime_data %>%
+  mutate(FIPS_ST = sprintf("%02d", as.numeric(as.character(FIPS_ST)))) %>%
+  group_by(FIPS_ST) %>%
+  summarise(Violent = sum(MURDER + RAPE + ROBBERY + AGASSLT, na.rm = TRUE),
+            Property = sum(BURGLRY + LARCENY + MVTHEFT + ARSON, na.rm = TRUE), .groups = 'drop') %>%
+  left_join(fips_crosswalk %>% select(state_fipcode, state_name) %>% distinct(), 
+            by = c("FIPS_ST" = "state_fipcode")) %>%
+  filter(!is.na(state_name)) %>%
+  mutate(Total = Violent + Property) %>% arrange(desc(Total)) %>% slice_head(n = 15)
+```
+
+## Column {data-width="1200"}
+
+### Total Crime Distribution by State (2002-2014)
+
+```{r treemap_simple}
+plot_ly(type = "treemap", ids = paste0("state_", seq_along(state_crime_totals$state_name)),
+        labels = state_crime_totals$state_name, parents = rep("", nrow(state_crime_totals)),
+        values = state_crime_totals$Total, textinfo = "label+value+percent parent",
+        hovertemplate = paste("<b>%{label}</b><br>Total Crimes: %{value:,}<br>Percentage: %{percentParent}<br><extra></extra>"),
+        marker = list(colorscale = "Viridis", colorbar = list(title = "Total Crimes")),
+        branchvalues = "total") %>%
+  layout(title = list(text = "Total Crime Distribution by State (2002-2014)", font = list(size = 16)),
+         font = list(size = 13), 
+         margin = list(t = 60, b = 30, l = 30, r = 30),
+         height = 450) %>%
+  config(responsive = TRUE)
+```
+
+### Crime Breakdown by State and Type (Top 15 States)
+
+```{r treemap_breakdown}
+plot_ly(type = "treemap",
+        labels = c(state_breakdown$state_name,
+                  paste(rep(state_breakdown$state_name, each = 2), c("- Violent", "- Property"))),
+        parents = c(rep("", nrow(state_breakdown)), rep(state_breakdown$state_name, each = 2)),
+        values = c(state_breakdown$Total, c(rbind(state_breakdown$Violent, state_breakdown$Property))),
+        textinfo = "label+value+percent parent",
+        hovertemplate = paste("<b>%{label}</b><br>Crimes: %{value:,}<br>Percentage of Parent: %{percentParent}<br><extra></extra>"),
+        marker = list(colorscale = "RdYlBu", colorbar = list(title = "Crime Count")),
+        branchvalues = "total", maxdepth = 2) %>%
+  layout(title = list(text = "Crime Breakdown by State and Type (Top 15 States)", font = list(size = 16)),
+         font = list(size = 12), 
+         margin = list(t = 60, b = 30, l = 30, r = 30),
+         height = 450) %>%
+  config(responsive = TRUE)
+```
+
+## Column {data-width="800"}
+
+### Geographic Analysis Summary
+
+```{r geographic_summary}
+total_national_crime <- sum(state_crime_totals$Total)
+top_5_states <- head(state_crime_totals, 5)
+top_5_percentage <- sum(top_5_states$Total) / total_national_crime * 100
+
+summary_insights <- data.frame(
+  Metric = c("Total National Crime (2002-2014)", "Top 5 States Crime Share",
+             "Highest Crime State", "Lowest Crime State (of reporting states)"),
+  Value = c(scales::comma(total_national_crime), paste0(round(top_5_percentage, 1), "%"),
+            top_5_states$state_name[1], tail(state_crime_totals$state_name, 1))
+)
+
+knitr::kable(summary_insights, col.names = c("Key Insight", "Value"),
+  caption = "**Geographic Analysis Summary**", align = c("l", "r")) %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"),
+                           full_width = TRUE, position = "center",
+                           font_size = 14) %>%
+  kableExtra::column_spec(1, bold = TRUE) %>%
+  kableExtra::column_spec(2, bold = TRUE, color = "#2c3e50")
+```
+
+### Top 10 States by Total Crime
+
+```{r top_states_table}
+top_states_display <- head(state_crime_totals, 10) %>%
+  mutate(Rank = row_number(),
+         Crime_Total = as.numeric(Total),
+         Total = scales::comma(Total),
+         Percentage = paste0(round((Crime_Total / total_national_crime) * 100, 2), "%")) %>%
+  select(Rank, State = state_name, `Total Crimes` = Total, `% of National` = Percentage)
+
+knitr::kable(top_states_display,
+  caption = "**Top 10 States by Total Crime (2002-2014)**",
+  align = c("c", "l", "r", "r")) %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"),
+                           full_width = TRUE, position = "center",
+                           font_size = 12) %>%
+  kableExtra::column_spec(1, bold = TRUE, background = "#f8f9fa") %>%
+  kableExtra::row_spec(1:3, background = "#fff3cd")
+```
